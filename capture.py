@@ -5,7 +5,7 @@ capture = WindowsCapture(
     cursor_capture=None,
     draw_border=None,
     monitor_index=None,
-    window_name=None,
+    window_name="Apex Legeneds",
 )
 
 
