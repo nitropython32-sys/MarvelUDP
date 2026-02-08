@@ -1,15 +1,29 @@
-import socket
+# sender.py  (run on the machine with the webcam)
+import subprocess
 
-UDP_IP = "192.168.4.102"
-UDP_PORT = 5005
-MESSAGE = b"Hello, World!"
+CLIENT_IP = "192.168.4.100"
+PORT = 23000
 
-sock = socket.socket(socket.AF_INET,  # Internet
-                     socket.SOCK_DGRAM)  # UDP
-sock.bind((UDP_IP, UDP_PORT))
+cmd = [
+    "ffmpeg",
+    "-f", "v4l2",
+    "-input_format", "mjpeg",
+    "-framerate", "30",
+    "-video_size", "1920x1080",
+    "-i", "/dev/video0",
+    "-c:v", "libx264",
+    "-preset", "veryfast",
+    "-crf", "20",
+    "-tune", "zerolatency",
+    "-maxrate", "8M",
+    "-bufsize", "16M",
+    "-g", "60",
+    "-keyint_min", "60",
+    "-sc_threshold", "0",
+    "-x264-params", "repeat-headers=1",
+    "-f", "mpegts",
+    "-mpegts_flags", "+resend_headers",
+    f"udp://{CLIENT_IP}:{PORT}?pkt_size=1316",
+]
 
-print(f"UDP server up and listening on {UDP_IP}:{UDP_PORT}")
-
-while True:
-    data, addr = sock.recvfrom(1024)  # buffer size is 1024 bytes
-    print(f"received message: {data} from {addr}")
+subprocess.run(cmd, check=True)

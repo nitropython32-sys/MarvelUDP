@@ -1,14 +1,12 @@
-import socket
-import time
+# receiver.py (run on the client/viewer machine)
+import subprocess
 
-UDP_IP = "192.168.4.102"
-UDP_PORT = 5005
-MESSAGE = b"Hello, Server!"
+PORT = 23000
 
-sock = socket.socket(socket.AF_INET,  # Internet
-                     socket.SOCK_DGRAM)  # UDP
+cmd = [
+    "ffplay",
+    "-flags", "low_delay",
+    f"udp://0.0.0.0:{PORT}",
+]
 
-while True:
-    print(f"Sending message: {MESSAGE}")
-    sock.sendto(MESSAGE, (UDP_IP, UDP_PORT))
-    time.sleep(30)
+subprocess.run(cmd, check=True)
