@@ -1,4 +1,4 @@
-# sender.py  (run on the machine with the webcam)
+# sender.py
 import subprocess
 
 CLIENT_IP = "192.168.4.100"
@@ -7,6 +7,7 @@ PORT = 23000
 cmd = [
     "ffmpeg",
     "-f", "v4l2",
+    "-fflags", "+discardcorrupt",
     "-input_format", "mjpeg",
     "-framerate", "30",
     "-video_size", "1920x1080",
