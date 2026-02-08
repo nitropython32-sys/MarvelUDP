@@ -106,7 +106,6 @@ def stop_ffmpeg_stream():
             print("FFmpeg process stopped.")
     ffmpeg_process = None
 
-@WindowsCapture.event
 def on_frame_arrived(frame: Frame, capture_control: InternalCaptureControl):
     global ffmpeg_process, capture_control_ref, frame_counter, start_time
 
@@ -143,7 +142,6 @@ def on_frame_arrived(frame: Frame, capture_control: InternalCaptureControl):
             stop_ffmpeg_stream()
             capture_control.stop() # Stop capture as we can't send frames
 
-@WindowsCapture.event
 def on_closed():
     print("Capture session closed. Stopping FFmpeg stream.")
     stop_ffmpeg_stream()
@@ -166,6 +164,10 @@ def main():
             cursor_capture=True,
             draw_border=True
         )
+        # Assign event handlers
+        capture.on_frame_arrived = on_frame_arrived
+        capture.on_closed = on_closed
+
         print("WindowsCapture initialized. Starting capture loop...")
         capture.start() # This call blocks until the capture session is closed
     except Exception as e:
