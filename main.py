@@ -3,8 +3,8 @@ from windows_capture import WindowsCapture, Frame, InternalCaptureControl
 
 CLIENT_IP = "192.168.4.100"
 PORT = 23000
-FPS = 30
-WINDOW_NAME = "Apex Legends"
+FPS = 120
+WINDOW_NAME = "Marvel Rivals"
 
 ff = None
 W = H = None
