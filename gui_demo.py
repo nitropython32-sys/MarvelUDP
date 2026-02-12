@@ -50,95 +50,67 @@
 
 # root.mainloop()
 
-# gui_demo.py
 import subprocess
 import threading
 import queue
+from datetime import datetime
+from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageOps
 
 import tkinter as tk
 from tkinter import ttk
 
-
-# ----------------------------
-# Video receive/decode settings
-# ----------------------------
 PORT = 23000
 
-# IMPORTANT: do NOT name these W/H (tk.W is a sticky constant)
+# stream decode output (fixed raw frames)
 VID_W, VID_H = 1280, 720
-PIX_FMT = "rgb24"                 # raw RGB frames
+PIX_FMT = "rgb24"
 BYTES_PER_FRAME = VID_W * VID_H * 3
 
+frame_q = queue.Queue(maxsize=1)
 
-# 1-slot queue => realtime (drop old frames if UI falls behind)
-frame_q: "queue.Queue[np.ndarray]" = queue.Queue(maxsize=1)
-
+# holds the most recent frame (RGB uint8 numpy)
+latest_frame = {"frame": None}
 
 def ffmpeg_receiver():
-    """
-    Receives a UDP stream, decodes it, and outputs raw RGB frames to stdout.
-    We read fixed-size frames and push them into a tiny queue.
-    """
     cmd = [
         "ffmpeg",
         "-hide_banner", "-loglevel", "error",
-
-        # low-latency-ish flags (best effort; depends on stream)
         "-fflags", "nobuffer",
         "-flags", "low_delay",
         "-probesize", "32",
         "-analyzeduration", "0",
-
-        # input
         "-i", f"udp://0.0.0.0:{PORT}?fifo_size=1000000&overrun_nonfatal=1",
-
-        # no audio
         "-an",
-
-        # force output size + pixel format for deterministic frame size
         "-vf", f"scale={VID_W}:{VID_H}",
         "-f", "rawvideo",
         "-pix_fmt", PIX_FMT,
-
-        # stdout
         "pipe:1",
     ]
-
-    p = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        bufsize=10**7,
-    )
-
-    stdout = p.stdout
-    if stdout is None:
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10**7)
+    out = p.stdout
+    if out is None:
         return
 
     while True:
-        raw = stdout.read(BYTES_PER_FRAME)
+        raw = out.read(BYTES_PER_FRAME)
         if len(raw) != BYTES_PER_FRAME:
-            break  # stream ended or ffmpeg exited
+            break
 
         frame = np.frombuffer(raw, dtype=np.uint8).reshape((VID_H, VID_W, 3))
 
-        # Drop old frame if behind
-        try:
-            if frame_q.full():
-                frame_q.get_nowait()
-            frame_q.put_nowait(frame)
-        except queue.Empty:
-            pass
-        except queue.Full:
-            pass
-
+        # keep realtime
+        if frame_q.full():
+            try: frame_q.get_nowait()
+            except queue.Empty: pass
+        try: frame_q.put_nowait(frame)
+        except queue.Full: pass
 
 def build_gui():
     root = tk.Tk()
-    root.title("Clean GUI Demo")
+    root.title("Viewer")
     root.geometry("800x800")
 
     mainframe = ttk.Frame(root, padding=(3, 3, 12, 12))
@@ -147,34 +119,55 @@ def build_gui():
     central_frame = ttk.Frame(mainframe, relief="raised", borderwidth=2)
     central_frame.grid(column=0, row=0, sticky=(tk.N, tk.W, tk.E, tk.S))
 
-    # This label is where frames actually display (you can't draw into a Frame directly)
     video_label = ttk.Label(central_frame)
     video_label.grid(column=0, row=0, sticky=(tk.N, tk.W, tk.E, tk.S))
-    central_frame.columnconfigure(0, weight=1)
-    central_frame.rowconfigure(0, weight=1)
 
-    action_button = ttk.Button(mainframe, text="Click Me", width=20)
-    action_button.grid(column=0, row=1, pady=10)
-
-    # Expand layout
+    # Let widgets expand with window
     root.columnconfigure(0, weight=1)
     root.rowconfigure(0, weight=1)
     mainframe.columnconfigure(0, weight=1)
     mainframe.rowconfigure(0, weight=1)
+    central_frame.columnconfigure(0, weight=1)
+    central_frame.rowconfigure(0, weight=1)
 
-    for child in mainframe.winfo_children():
-        child.grid_configure(padx=5, pady=5)
+    # Track label size so the display auto-fits
+    target = {"w": 640, "h": 360}
+    def on_resize(e):
+        if e.width > 1 and e.height > 1:
+            target["w"], target["h"] = e.width, e.height
+    video_label.bind("<Configure>", on_resize)
 
-    return root, video_label
-
+    return root, mainframe, video_label, target
 
 def main():
-    root, video_label = build_gui()
+    root, mainframe, video_label, target = build_gui()
 
-    # Receiver thread
+    # Where to save snapshots
+    out_dir = Path.home() / "Pictures" / "snapshots"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    def snapshot(_event=None):
+        frame = latest_frame["frame"]
+        if frame is None:
+            print("No frame yet.")
+            return
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        path = out_dir / f"snapshot_{ts}.png"
+
+        Image.fromarray(frame).save(path)
+        print("Saved", path)
+
+    # Button
+    snap_btn = ttk.Button(mainframe, text="Snapshot (Ctrl+S)", command=snapshot)
+    snap_btn.grid(column=0, row=1, pady=10)
+
+    # Keybind (Ctrl+S)
+    root.bind("<Control-s>", snapshot)
+    root.bind("<Control-S>", snapshot)
+
     threading.Thread(target=ffmpeg_receiver, daemon=True).start()
 
-    # UI pump: runs on Tk main thread
     def ui_pump():
         try:
             frame = frame_q.get_nowait()
@@ -182,18 +175,23 @@ def main():
             root.after(5, ui_pump)
             return
 
-        # Convert frame -> Tk image
-        img = Image.fromarray(frame)  # frame is RGB uint8
-        tkimg = ImageTk.PhotoImage(img)
+        # store latest raw frame for snapshotting (no resize)
+        latest_frame["frame"] = frame
 
+        # display resized to widget
+        img = Image.fromarray(frame)
+        img = ImageOps.pad(img, (target["w"], target["h"]), method=Image.Resampling.LANCZOS)
+
+        tkimg = ImageTk.PhotoImage(img)
         video_label.configure(image=tkimg)
-        video_label.image = tkimg  # keep reference
+        video_label.image = tkimg
 
         root.after(5, ui_pump)
 
     ui_pump()
     root.mainloop()
 
-
 if __name__ == "__main__":
     main()
+
+
